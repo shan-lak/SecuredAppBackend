@@ -21,9 +21,12 @@ app.use(express.json());
 
 // Security Middleware
 const verifyAppSignature = (req, res, next) => {
-    const receivedAppSignature = req.headers['X-App-Signature'];
-    const receivedNonce = req.headers['X-Nonce'];
-    const receivedPayloadSignature = req.headers['X-Payload-Signature'];
+    // Log headers
+    console.log('All Headers Received:', JSON.stringify(req.headers, null, 2));
+
+    const receivedAppSignature =  req.header('x-app-signature');
+    const receivedNonce = req.header('x-nonce');
+    const receivedPayloadSignature = req.header('x-payload-signature');
 
     console.log(`Received headers: `);
     console.log(`X-App-Signature: ${receivedAppSignature}`);
