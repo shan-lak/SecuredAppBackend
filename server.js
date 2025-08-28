@@ -25,7 +25,13 @@ const verifyAppSignature = (req, res, next) => {
     const receivedNonce = req.headers['X-Nonce'];
     const receivedPayloadSignature = req.headers['X-Payload-Signature'];
 
+    console.log(`Received headers: `);
+    console.log(`X-App-Signature: ${receivedAppSignature}`);
+    console.log(`X-Nonce: ${receivedNonce}`);
+    console.log(`X-Payload-Signature: ${receivedPayloadSignature}`);
+
     if (!receivedAppSignature || !receivedNonce || !receivedPayloadSignature) {
+        console.warn(`Missing required headers`);
         return res.status(400).json({ error: 'Missing required headers' });
     }
 
@@ -38,6 +44,9 @@ const verifyAppSignature = (req, res, next) => {
     const currentTime = Date.now();
     const FIVE_MINUTES_IN_MS = 5 * 60 * 1000;
 
+    console.log(`Received nonce: ${requestTime}`);
+    console.log(`Current time: ${currentTime}`);
+
     if (isNaN(requestTime) || Math.abs(currentTime - requestTime) > FIVE_MINUTES_IN_MS) {
         console.warn(`Stale request rejected. Nonce: ${receivedNonce}`);
         return res.status(403).json({ error: 'Forbidden: Stale or invalid request' });
@@ -48,9 +57,14 @@ const verifyAppSignature = (req, res, next) => {
         .update(stringToSign)
         .digest('base64');
 
+    console.log(`Generated signature: ${expectedPayloadSignature}`);
+
     try{
         const receivedBuf = Buffer.from(receivedPayloadSignature, 'base64');
         const expectedBuf = Buffer.from(expectedPayloadSignature, 'base64');
+
+        console.log(`Received signature buffer length: ${receivedBuf.length}`);
+        console.log(`Expected signature buffer length: ${expectedBuf.length}`);
 
         if (receivedBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(receivedBuf, expectedBuf)) {
             console.warn(`Tampering attempt detected: Invalid payload signature.`);
