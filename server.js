@@ -1,94 +1,104 @@
-const express = require('express');
-const crypto = require('crypto');
-const cors = require('cors');
+const express = require("express");
+const crypto = require("crypto");
+const cors = require("cors");
 
-require('dotenv').config();
+require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-//Load secrets
+// Load secrets
 const APP_SIGNATURE_HASH = process.env.APP_SIGNATURE_HASH;
 const HMAC_SECRET_KEY = process.env.HMAC_SECRET_KEY;
 
-if(!APP_SIGNATURE_HASH || !HMAC_SECRET_KEY) {
-    console.error("Missing required security secrets");
-    process.exit(1);
+// Validate secrets
+if (!APP_SIGNATURE_HASH || !HMAC_SECRET_KEY) {
+  console.error("Missing required security secrets");
+  process.exit(1);
 }
 
+// Middleware
 app.use(cors());
 app.use(express.json());
 
 // Security Middleware
 const verifyAppSignature = (req, res, next) => {
-    // Log headers
-    console.log('All Headers Received:', JSON.stringify(req.headers, null, 2));
+  const receivedAppSignature = req.header("x-app-signature");
+  const receivedNonce = req.header("x-nonce");
+  const receivedPayloadSignature = req.header("x-payload-signature");
 
-    const receivedAppSignature =  req.header('x-app-signature');
-    const receivedNonce = req.header('x-nonce');
-    const receivedPayloadSignature = req.header('x-payload-signature');
+  console.log(`Received headers: `);
+  console.log(`X-App-Signature: ${receivedAppSignature}`);
+  console.log(`X-Nonce: ${receivedNonce}`);
+  console.log(`X-Payload-Signature: ${receivedPayloadSignature}`);
 
-    console.log(`Received headers: `);
-    console.log(`X-App-Signature: ${receivedAppSignature}`);
-    console.log(`X-Nonce: ${receivedNonce}`);
-    console.log(`X-Payload-Signature: ${receivedPayloadSignature}`);
+  if (!receivedAppSignature || !receivedNonce || !receivedPayloadSignature) {
+    console.warn(`Missing required headers`);
+    return res.status(400).json({ error: "Missing required headers" });
+  }
 
-    if (!receivedAppSignature || !receivedNonce || !receivedPayloadSignature) {
-        console.warn(`Missing required headers`);
-        return res.status(400).json({ error: 'Missing required headers' });
+  if (receivedAppSignature != APP_SIGNATURE_HASH) {
+    console.warn(`Tampering attempt detected: Invalid app signature.`);
+    return res.status(403).json({ error: "Forbidden: Invalid App Signature" });
+  }
+
+  const requestTime = parseInt(receivedNonce, 10);
+  const currentTime = Date.now();
+  const FIVE_MINUTES_IN_MS = 5 * 60 * 1000;
+
+  console.log(`Received nonce: ${requestTime}`);
+  console.log(`Current time: ${currentTime}`);
+
+  if (
+    isNaN(requestTime) ||
+    Math.abs(currentTime - requestTime) > FIVE_MINUTES_IN_MS
+  ) {
+    console.warn(`Stale request rejected. Nonce: ${receivedNonce}`);
+    return res
+      .status(403)
+      .json({ error: "Forbidden: Stale or invalid request" });
+  }
+
+  const stringToSign = `${receivedAppSignature}.${receivedNonce}`;
+  const expectedPayloadSignature = crypto
+    .createHmac("sha256", HMAC_SECRET_KEY)
+    .update(stringToSign)
+    .digest("base64");
+
+  try {
+    const receivedBuf = Buffer.from(receivedPayloadSignature, "base64");
+    const expectedBuf = Buffer.from(expectedPayloadSignature, "base64");
+
+    if (
+      receivedBuf.length !== expectedBuf.length ||
+      !crypto.timingSafeEqual(receivedBuf, expectedBuf)
+    ) {
+      console.warn(`Tampering attempt detected: Invalid payload signature.`);
+      return res
+        .status(403)
+        .json({ error: "Forbidden: Invalid Payload Signature" });
     }
+  } catch (error) {
+    console.error(`Error processing payload signature: ${error.message}`);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
 
-    if(receivedAppSignature != APP_SIGNATURE_HASH) {
-        console.warn(`Tampering attempt detected: Invalid app signature.`);
-        return res.status(403).json({ error: 'Forbidden: Invalid App Signature' });
-    }
+  console.log("Request verified successfully!");
 
-    const requestTime = parseInt(receivedNonce, 10);
-    const currentTime = Date.now();
-    const FIVE_MINUTES_IN_MS = 5 * 60 * 1000;
-
-    console.log(`Received nonce: ${requestTime}`);
-    console.log(`Current time: ${currentTime}`);
-
-    if (isNaN(requestTime) || Math.abs(currentTime - requestTime) > FIVE_MINUTES_IN_MS) {
-        console.warn(`Stale request rejected. Nonce: ${receivedNonce}`);
-        return res.status(403).json({ error: 'Forbidden: Stale or invalid request' });
-    }
-
-    const stringToSign = `${receivedAppSignature}.${receivedNonce}`;
-    const expectedPayloadSignature = crypto.createHmac('sha256', HMAC_SECRET_KEY)
-        .update(stringToSign)
-        .digest('base64');
-
-    console.log(`Generated signature: ${expectedPayloadSignature}`);
-
-    try{
-        const receivedBuf = Buffer.from(receivedPayloadSignature, 'base64');
-        const expectedBuf = Buffer.from(expectedPayloadSignature, 'base64');
-
-        console.log(`Received signature buffer length: ${receivedBuf.length}`);
-        console.log(`Expected signature buffer length: ${expectedBuf.length}`);
-
-        if (receivedBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(receivedBuf, expectedBuf)) {
-            console.warn(`Tampering attempt detected: Invalid payload signature.`);
-            return res.status(403).json({ error: 'Forbidden: Invalid Payload Signature' });
-        }
-    } catch (error) {
-        console.error(`Error processing payload signature: ${error.message}`);
-        return res.status(500).json({ error: 'Internal Server Error' });
-    }
-
-    console.log("Request verified successfully!");
-
-    next();
+  next();
 };
 
-app.use('/api',verifyAppSignature);
+// Apply security middleware to API routes
+app.use("/api", verifyAppSignature);
 
-app.get('/api/v1/sensitive-data', (req, res) => {
-    res.json({ message: 'Secure data accessed successfully!', data: {title: "Sample Title", description: "Sample Description"} });
+// API route
+app.get("/api/v1/sensitive-data", (req, res) => {
+  res.json({
+    message: "Secure data accessed successfully!",
+    data: { title: "Sample Title", description: "Sample Description" },
+  });
 });
 
 app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
 });
