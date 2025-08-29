@@ -86,7 +86,7 @@ const verifyAppSignature = (req, res, next) => {
 app.use('/api',verifyAppSignature);
 
 app.get('/api/v1/sensitive-data', (req, res) => {
-    res.json({ message: 'Secure data accessed successfully!' });
+    res.json({ message: 'Secure data accessed successfully!', data: {title: "Sample Title", description: "Sample Description"} });
 });
 
 app.listen(PORT, () => {
